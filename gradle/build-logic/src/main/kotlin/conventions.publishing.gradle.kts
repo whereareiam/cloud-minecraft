@@ -1,6 +1,3 @@
-import org.incendo.cloudbuildlogic.city
-import org.incendo.cloudbuildlogic.jmp
-
 plugins {
     id("org.incendo.cloud-build-logic.publishing")
 }
@@ -12,16 +9,24 @@ if (!name.endsWith("-bom")) {
 }
 
 indra {
-    github("Incendo", "cloud-minecraft") {
+    github("whereareiam", "cloud-minecraft") {
         ci(true)
     }
     mitLicense()
+}
 
-    configurePublications {
-        pom {
-            developers {
-                jmp()
-                city()
+publishing {
+    repositories {
+        maven {
+            val realm = (
+                System.getenv("PUBLISH_REALM")
+                    ?: if ((System.getenv("VERSION") ?: "dev").contains("dev", true)) "development" else "release"
+                )
+                .lowercase()
+            url = uri("https://maven.whereareiam.me/$realm")
+            credentials {
+                username = System.getenv("PUBLISH_USER") ?: ""
+                password = System.getenv("PUBLISH_TOKEN") ?: ""
             }
         }
     }

@@ -3,6 +3,11 @@ plugins {
     alias(libs.plugins.cloud.buildLogic.rootProject.spotless)
 }
 
+allprojects {
+    version = System.getenv("VERSION") ?: "dev"
+    group = "me.whereareiam"
+}
+
 spotlessPredeclare {
     kotlin { ktlint(libs.versions.ktlint.get()) }
     kotlinGradle { ktlint(libs.versions.ktlint.get()) }
