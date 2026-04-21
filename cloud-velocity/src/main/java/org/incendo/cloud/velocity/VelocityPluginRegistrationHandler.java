@@ -26,13 +26,20 @@ package org.incendo.cloud.velocity;
 import com.velocitypowered.api.command.BrigadierCommand;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.CommandSource;
+import com.velocitypowered.api.command.RawCommand;
 import java.util.Collection;
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.incendo.cloud.Command;
 import org.incendo.cloud.brigadier.CloudBrigadierCommand;
 import org.incendo.cloud.brigadier.CloudBrigadierManager;
 import org.incendo.cloud.component.CommandComponent;
 import org.incendo.cloud.internal.CommandRegistrationHandler;
+import org.incendo.cloud.suggestion.Suggestion;
+import org.incendo.cloud.suggestion.Suggestions;
+import org.incendo.cloud.util.StringUtils;
 
 final class VelocityPluginRegistrationHandler<C> implements CommandRegistrationHandler<C> {
 
@@ -50,6 +57,14 @@ final class VelocityPluginRegistrationHandler<C> implements CommandRegistrationH
     @Override
     @SuppressWarnings("unchecked")
     public boolean registerCommand(final @NonNull Command<C> command) {
+        if (this.manager.registrationMode() == VelocityCommandRegistrationMode.RAW) {
+            return this.registerRawCommand(command);
+        }
+        return this.registerBrigadierCommand(command);
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean registerBrigadierCommand(final @NonNull Command<C> command) {
         final CommandComponent<C> component = command.rootComponent();
         final Collection<String> aliases = component.alternativeAliases();
         final BrigadierCommand brigadierCommand = new BrigadierCommand(
@@ -67,7 +82,59 @@ final class VelocityPluginRegistrationHandler<C> implements CommandRegistrationH
         return true;
     }
 
+    private boolean registerRawCommand(final @NonNull Command<C> command) {
+        final CommandComponent<C> component = command.rootComponent();
+        final Collection<String> aliases = component.alternativeAliases();
+        final RawCommand rawCommand = new RawVelocityCommand<>(this.manager, component);
+        final CommandMeta commandMeta = this.manager.proxyServer().getCommandManager()
+                .metaBuilder(component.name())
+                .aliases(aliases.toArray(new String[0])).build();
+        this.manager.proxyServer().getCommandManager().unregister(component.name());
+        aliases.forEach(this.manager.proxyServer().getCommandManager()::unregister);
+        this.manager.proxyServer().getCommandManager().register(commandMeta, rawCommand);
+        return true;
+    }
+
     @NonNull CloudBrigadierManager<C, CommandSource> brigadierManager() {
         return this.brigadierManager;
+    }
+
+    private static final class RawVelocityCommand<C> implements RawCommand {
+
+        private final VelocityCommandManager<C> manager;
+        private final CommandComponent<C> component;
+
+        private RawVelocityCommand(
+                final @NonNull VelocityCommandManager<C> manager,
+                final @NonNull CommandComponent<C> component
+        ) {
+            this.manager = manager;
+            this.component = component;
+        }
+
+        @Override
+        public void execute(final @NonNull Invocation invocation) {
+            final C sender = this.manager.senderMapper().map(invocation.source());
+            this.manager.commandExecutor().executeCommand(sender, this.input(invocation.arguments()));
+        }
+
+        @Override
+        public @NonNull List<@NonNull String> suggest(final @NonNull Invocation invocation) {
+            final C sender = this.manager.senderMapper().map(invocation.source());
+            final Suggestions<C, ?> result = this.manager.suggestionFactory()
+                    .suggestImmediately(sender, this.input(invocation.arguments()));
+            return result.list().stream()
+                    .map(Suggestion::suggestion)
+                    .map(suggestion -> StringUtils.trimBeforeLastSpace(suggestion, result.commandInput()))
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+        }
+
+        private @NonNull String input(final @NonNull String arguments) {
+            if (arguments.isEmpty()) {
+                return this.component.name();
+            }
+            return this.component.name() + " " + arguments;
+        }
     }
 }

@@ -76,6 +76,7 @@ public class VelocityCommandManager<C> extends CommandManager<C>
     private final ProxyServer proxyServer;
     private final SenderMapper<CommandSource, C> senderMapper;
     private final SuggestionFactory<C, ? extends TooltipSuggestion> suggestionFactory;
+    private final VelocityCommandRegistrationMode registrationMode;
 
     /**
      * Create a new command manager instance
@@ -93,10 +94,37 @@ public class VelocityCommandManager<C> extends CommandManager<C>
             final @NonNull ExecutionCoordinator<C> commandExecutionCoordinator,
             final @NonNull SenderMapper<CommandSource, C> senderMapper
     ) {
+        this(
+                plugin,
+                proxyServer,
+                commandExecutionCoordinator,
+                senderMapper,
+                VelocityCommandRegistrationMode.BRIGADIER
+        );
+    }
+
+    /**
+     * Create a new command manager instance
+     *
+     * @param plugin                       Container for the owning plugin
+     * @param proxyServer                  ProxyServer instance
+     * @param commandExecutionCoordinator  Coordinator provider
+     * @param senderMapper                 Function that maps {@link CommandSource} to the command sender type
+     * @param registrationMode             The Velocity command registration mode to use
+     */
+    @SuppressWarnings({"unchecked", "this-escape"})
+    public VelocityCommandManager(
+            final @NonNull PluginContainer plugin,
+            final @NonNull ProxyServer proxyServer,
+            final @NonNull ExecutionCoordinator<C> commandExecutionCoordinator,
+            final @NonNull SenderMapper<CommandSource, C> senderMapper,
+            final @NonNull VelocityCommandRegistrationMode registrationMode
+    ) {
         super(commandExecutionCoordinator, new VelocityPluginRegistrationHandler<>());
         this.proxyServer = proxyServer;
         this.senderMapper = senderMapper;
         this.suggestionFactory = super.suggestionFactory().mapped(TooltipSuggestion::tooltipSuggestion);
+        this.registrationMode = registrationMode;
 
         ((VelocityPluginRegistrationHandler<C>) this.commandRegistrationHandler()).initialize(this);
 
@@ -148,7 +176,8 @@ public class VelocityCommandManager<C> extends CommandManager<C>
     /**
      * {@inheritDoc}
      *
-     * <p>{@link VelocityCommandManager}s always use Brigadier for registration, so the aforementioned check is not needed.</p>
+     * <p>{@link VelocityCommandManager}s always expose a Brigadier manager, even when commands are registered in
+     * {@link VelocityCommandRegistrationMode#RAW} mode.</p>
      *
      * @return {@inheritDoc}
      * @since 1.2.0
@@ -166,6 +195,10 @@ public class VelocityCommandManager<C> extends CommandManager<C>
 
     final @NonNull ProxyServer proxyServer() {
         return this.proxyServer;
+    }
+
+    final @NonNull VelocityCommandRegistrationMode registrationMode() {
+        return this.registrationMode;
     }
 
     private void registerDefaultExceptionHandlers() {
