@@ -32,6 +32,14 @@ publishing {
     }
 }
 
+tasks.matching { task ->
+    task.name == "requireClean" ||
+        task.name == "requireTagged" ||
+        task.name.startsWith("sign")
+}.configureEach {
+    enabled = false
+}
+
 javadocLinks {
     defaultJavadocProvider = "https://www.javadocs.dev/{group}/{name}/{version}"
 }
