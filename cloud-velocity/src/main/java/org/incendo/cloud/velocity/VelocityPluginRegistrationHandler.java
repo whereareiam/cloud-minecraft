@@ -23,6 +23,8 @@
 //
 package org.incendo.cloud.velocity;
 
+import com.mojang.brigadier.builder.ArgumentBuilder;
+import com.mojang.brigadier.tree.CommandNode;
 import com.velocitypowered.api.command.BrigadierCommand;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.CommandSource;
@@ -55,7 +57,6 @@ final class VelocityPluginRegistrationHandler<C> implements CommandRegistrationH
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public boolean registerCommand(final @NonNull Command<C> command) {
         if (this.manager.registrationMode() == VelocityCommandRegistrationMode.RAW) {
             return this.registerRawCommand(command);
@@ -63,7 +64,6 @@ final class VelocityPluginRegistrationHandler<C> implements CommandRegistrationH
         return this.registerBrigadierCommand(command);
     }
 
-    @SuppressWarnings("unchecked")
     private boolean registerBrigadierCommand(final @NonNull Command<C> command) {
         final CommandComponent<C> component = command.rootComponent();
         final Collection<String> aliases = component.alternativeAliases();
@@ -86,9 +86,18 @@ final class VelocityPluginRegistrationHandler<C> implements CommandRegistrationH
         final CommandComponent<C> component = command.rootComponent();
         final Collection<String> aliases = component.alternativeAliases();
         final RawCommand rawCommand = new RawVelocityCommand<>(this.manager, component);
-        final CommandMeta commandMeta = this.manager.proxyServer().getCommandManager()
+        final CommandMeta.Builder commandMetaBuilder = this.manager.proxyServer().getCommandManager()
                 .metaBuilder(component.name())
-                .aliases(aliases.toArray(new String[0])).build();
+                .aliases(aliases.toArray(new String[0]));
+        this.brigadierManager.literalBrigadierNodeFactory()
+                .createNode(
+                        component.name(),
+                        command,
+                        new CloudBrigadierCommand<>(this.manager, this.brigadierManager)
+                )
+                .getChildren()
+                .forEach(child -> commandMetaBuilder.hint(copyForHinting(child)));
+        final CommandMeta commandMeta = commandMetaBuilder.build();
         this.manager.proxyServer().getCommandManager().unregister(component.name());
         aliases.forEach(this.manager.proxyServer().getCommandManager()::unregister);
         this.manager.proxyServer().getCommandManager().register(commandMeta, rawCommand);
@@ -97,6 +106,13 @@ final class VelocityPluginRegistrationHandler<C> implements CommandRegistrationH
 
     @NonNull CloudBrigadierManager<C, CommandSource> brigadierManager() {
         return this.brigadierManager;
+    }
+
+    private static <S> @NonNull CommandNode<S> copyForHinting(final @NonNull CommandNode<S> hint) {
+        final ArgumentBuilder<S, ?> builder = hint.createBuilder();
+        builder.executes(null);
+        hint.getChildren().forEach(child -> builder.then(copyForHinting(child)));
+        return builder.build();
     }
 
     private static final class RawVelocityCommand<C> implements RawCommand {
@@ -115,14 +131,14 @@ final class VelocityPluginRegistrationHandler<C> implements CommandRegistrationH
         @Override
         public void execute(final @NonNull Invocation invocation) {
             final C sender = this.manager.senderMapper().map(invocation.source());
-            this.manager.commandExecutor().executeCommand(sender, this.input(invocation.arguments()));
+            this.manager.commandExecutor().executeCommand(sender, this.executionInput(invocation.arguments()));
         }
 
         @Override
         public @NonNull List<@NonNull String> suggest(final @NonNull Invocation invocation) {
             final C sender = this.manager.senderMapper().map(invocation.source());
             final Suggestions<C, ?> result = this.manager.suggestionFactory()
-                    .suggestImmediately(sender, this.input(invocation.arguments()));
+                    .suggestImmediately(sender, this.suggestionInput(invocation.arguments()));
             return result.list().stream()
                     .map(Suggestion::suggestion)
                     .map(suggestion -> StringUtils.trimBeforeLastSpace(suggestion, result.commandInput()))
@@ -130,11 +146,32 @@ final class VelocityPluginRegistrationHandler<C> implements CommandRegistrationH
                     .collect(Collectors.toList());
         }
 
-        private @NonNull String input(final @NonNull String arguments) {
+        private @NonNull String executionInput(final @NonNull String arguments) {
             if (arguments.isEmpty()) {
                 return this.component.name();
             }
+            if (this.blank(arguments)) {
+                return this.component.name();
+            }
+            return this.prefixInput(arguments);
+        }
+
+        private @NonNull String suggestionInput(final @NonNull String arguments) {
+            if (this.blank(arguments)) {
+                return this.component.name() + " ";
+            }
+            return this.prefixInput(arguments);
+        }
+
+        private @NonNull String prefixInput(final @NonNull String arguments) {
+            if (arguments.startsWith(" ")) {
+                return this.component.name() + arguments;
+            }
             return this.component.name() + " " + arguments;
+        }
+
+        private boolean blank(final @NonNull String arguments) {
+            return arguments.trim().isEmpty();
         }
     }
 }
