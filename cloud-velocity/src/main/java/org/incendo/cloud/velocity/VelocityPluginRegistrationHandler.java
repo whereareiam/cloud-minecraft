@@ -23,8 +23,8 @@
 //
 package org.incendo.cloud.velocity;
 
-import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.command.CommandSource;
+import com.velocitypowered.api.proxy.ProxyServer;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.incendo.cloud.Command;
 import org.incendo.cloud.brigadier.CloudBrigadierManager;

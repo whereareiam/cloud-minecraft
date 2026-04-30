@@ -41,6 +41,13 @@ public final class VelocityBrigadierRegistrationHandler<C> {
     private ProxyServer proxyServer;
     private CloudBrigadierManager<C, CommandSource> brigadierManager;
 
+    /**
+     * Initialize the registration handler.
+     *
+     * @param velocityCommandManager command manager
+     * @param proxyServer proxy server
+     * @param cloudBrigadierManager brigadier manager
+     */
     public void initialize(
             final @NonNull VelocityCommandManager<C> velocityCommandManager,
             final @NonNull ProxyServer proxyServer,
@@ -51,6 +58,12 @@ public final class VelocityBrigadierRegistrationHandler<C> {
         this.brigadierManager = cloudBrigadierManager;
     }
 
+    /**
+     * Register the command using Velocity's Brigadier integration.
+     *
+     * @param command command to register
+     * @return {@code true}
+     */
     public boolean register(final @NonNull Command<C> command) {
         final CommandComponent<C> component = command.rootComponent();
         final Collection<String> aliases = component.alternativeAliases();

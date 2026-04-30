@@ -32,7 +32,6 @@ import com.velocitypowered.api.command.BrigadierCommand;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.proxy.ProxyServer;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -55,6 +54,13 @@ public final class VelocityRawRegistrationHandler<C> {
     private ProxyServer proxyServer;
     private CloudBrigadierManager<C, CommandSource> brigadierManager;
 
+    /**
+     * Initialize the registration handler.
+     *
+     * @param velocityCommandManager command manager
+     * @param proxyServer proxy server
+     * @param cloudBrigadierManager brigadier manager
+     */
     public void initialize(
             final @NonNull VelocityCommandManager<C> velocityCommandManager,
             final @NonNull ProxyServer proxyServer,
@@ -65,10 +71,18 @@ public final class VelocityRawRegistrationHandler<C> {
         this.brigadierManager = cloudBrigadierManager;
     }
 
+    /**
+     * Register a merged same-root command tree that validates through Brigadier while
+     * still delegating execution and suggestions through the raw Cloud path.
+     *
+     * @param command command to register
+     * @return {@code true}
+     */
     public boolean register(final @NonNull Command<C> command) {
         final CommandComponent<C> component = command.rootComponent();
         final List<Command<C>> rootCommands = this.manager.commands().stream()
-            .filter(registered -> registered.rootComponent().name().equals(component.name())).collect(Collectors.toList());
+                .filter(registered -> registered.rootComponent().name().equals(component.name()))
+                .collect(Collectors.toList());
         if (rootCommands.stream().noneMatch(registered -> registered == command)) {
             rootCommands.add(command);
         }
