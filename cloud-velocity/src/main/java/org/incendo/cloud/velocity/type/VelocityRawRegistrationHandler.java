@@ -23,18 +23,19 @@
 //
 package org.incendo.cloud.velocity.type;
 
-import com.mojang.brigadier.builder.ArgumentBuilder;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.tree.CommandNode;
+import com.mojang.brigadier.tree.LiteralCommandNode;
+import com.velocitypowered.api.command.BrigadierCommand;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.CommandSource;
-import com.velocitypowered.api.command.RawCommand;
 import com.velocitypowered.api.proxy.ProxyServer;
+import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import org.checkerframework.checker.nullness.qual.NonNull;
@@ -48,7 +49,7 @@ import org.incendo.cloud.util.StringUtils;
 import org.incendo.cloud.velocity.VelocityCommandManager;
 
 public final class VelocityRawRegistrationHandler<C> {
-    private static final String ARGUMENTS_NODE_NAME = "arguments";
+    private static final String RAW_ARGUMENTS_NODE_NAME = "arguments";
 
     private VelocityCommandManager<C> manager;
     private ProxyServer proxyServer;
@@ -67,156 +68,120 @@ public final class VelocityRawRegistrationHandler<C> {
     public boolean register(final @NonNull Command<C> command) {
         final CommandComponent<C> component = command.rootComponent();
         final List<Command<C>> rootCommands = this.manager.commands().stream()
-                .filter(registered -> registered.rootComponent().name().equals(component.name()))
-                .collect(Collectors.toList());
+            .filter(registered -> registered.rootComponent().name().equals(component.name())).collect(Collectors.toList());
+        if (rootCommands.stream().noneMatch(registered -> registered == command)) {
+            rootCommands.add(command);
+        }
+
         final Collection<String> aliases = rootCommands.stream()
                 .flatMap(registered -> registered.rootComponent().alternativeAliases().stream())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        final RawCommand rawCommand = new RawVelocityCommand<>(this.manager, component);
-        final CommandMeta.Builder commandMetaBuilder = this.proxyServer.getCommandManager()
-                .metaBuilder(component.name())
-                .aliases(aliases.toArray(new String[0]));
-        this.collectRawHints(component.name(), rootCommands)
-                .forEach(commandMetaBuilder::hint);
-        final CommandMeta commandMeta = commandMetaBuilder.build();
+        final LiteralCommandNode<CommandSource> mergedRoot = this.mergeRoot(component.name(), rootCommands);
+        final BrigadierCommand brigadierCommand = new BrigadierCommand(this.createRawShell(mergedRoot));
+        final CommandMeta commandMeta = this.proxyServer.getCommandManager()
+                .metaBuilder(brigadierCommand)
+                .aliases(aliases.toArray(new String[0]))
+                .build();
         this.proxyServer.getCommandManager().unregister(component.name());
         aliases.forEach(this.proxyServer.getCommandManager()::unregister);
-        this.proxyServer.getCommandManager().register(commandMeta, rawCommand);
+        this.proxyServer.getCommandManager().register(commandMeta, brigadierCommand);
         return true;
     }
 
-    private @NonNull Collection<CommandNode<CommandSource>> collectRawHints(
+    private @NonNull LiteralCommandNode<CommandSource> mergeRoot(
             final @NonNull String rootName,
-            final @NonNull List<Command<C>> commands
+            final @NonNull List<org.incendo.cloud.Command<C>> commands
     ) {
-        final Map<String, CommandNode<CommandSource>> mergedHints = new LinkedHashMap<>();
-        for (final Command<C> registered : commands) {
-            this.brigadierManager.literalBrigadierNodeFactory()
+        LiteralCommandNode<CommandSource> mergedRoot = null;
+        for (final org.incendo.cloud.Command<C> registered : commands) {
+            final LiteralCommandNode<CommandSource> rawRoot = this.brigadierManager.literalBrigadierNodeFactory()
                     .createNode(
                             rootName,
                             registered,
                             new CloudBrigadierCommand<>(this.manager, this.brigadierManager)
-                    )
-                    .getChildren()
-                    .stream()
-                    .filter(child -> !ARGUMENTS_NODE_NAME.equals(child.getName()))
-                    .forEach(child -> mergeHintNode(mergedHints, copyForHinting(child)));
-        }
-
-        return mergedHints.values();
-    }
-
-    private static void mergeHintNode(
-            final @NonNull Map<String, CommandNode<CommandSource>> mergedHints,
-            final @NonNull CommandNode<CommandSource> incoming
-    ) {
-        final CommandNode<CommandSource> existing = mergedHints.get(incoming.getName());
-        if (existing == null) {
-            mergedHints.put(incoming.getName(), incoming);
-            return;
-        }
-
-        mergeHintChildren(existing, incoming);
-    }
-
-    private static void mergeHintChildren(
-            final @NonNull CommandNode<CommandSource> target,
-            final @NonNull CommandNode<CommandSource> incoming
-    ) {
-        for (final CommandNode<CommandSource> child : incoming.getChildren()) {
-            final CommandNode<CommandSource> existingChild = target.getChild(child.getName());
-            if (existingChild == null) {
-                target.addChild(copyForHinting(child));
+                    );
+            if (mergedRoot == null) {
+                mergedRoot = rawRoot;
                 continue;
             }
-            mergeHintChildren(existingChild, child);
+            for (final CommandNode<CommandSource> child : rawRoot.getChildren()) {
+                mergedRoot.addChild(child);
+            }
         }
+        if (mergedRoot == null) {
+            throw new IllegalStateException("No commands registered for root " + rootName);
+        }
+        return mergedRoot;
     }
 
-    private static <S> @NonNull CommandNode<S> copyForHinting(final @NonNull CommandNode<S> hint) {
-        final ArgumentBuilder<S, ?> builder = hint.createBuilder();
-        builder.executes(null);
-        hint.getChildren().stream()
-                .filter(child -> !ARGUMENTS_NODE_NAME.equals(child.getName()))
-                .forEach(child -> builder.then(copyForHinting(child)));
+    private @NonNull LiteralCommandNode<CommandSource> createRawShell(final @NonNull LiteralCommandNode<CommandSource> mergedRoot) {
+        final LiteralArgumentBuilder<CommandSource> builder = mergedRoot.createBuilder();
+        builder.executes(this.rawExecutor());
+        this.copyLiteralChildren(builder, mergedRoot);
         return builder.build();
     }
 
-    private static final class RawVelocityCommand<C> implements RawCommand {
-
-        private final VelocityCommandManager<C> manager;
-        private final CommandComponent<C> component;
-
-        private RawVelocityCommand(
-                final @NonNull VelocityCommandManager<C> manager,
-                final @NonNull CommandComponent<C> component
-        ) {
-            this.manager = manager;
-            this.component = component;
-        }
-
-        @Override
-        public void execute(final @NonNull Invocation invocation) {
-            final C sender = this.manager.senderMapper().map(invocation.source());
-            this.manager.commandExecutor().executeCommand(sender, this.executionInput(invocation.arguments()));
-        }
-
-        @Override
-        public @NonNull List<@NonNull String> suggest(final @NonNull Invocation invocation) {
-            if (invocation.arguments().trim().isEmpty()) {
-                return Collections.emptyList();
+    private void copyLiteralChildren(
+            final @NonNull LiteralArgumentBuilder<CommandSource> parentBuilder,
+            final @NonNull CommandNode<CommandSource> source
+    ) {
+        boolean addedArguments = false;
+        for (final CommandNode<CommandSource> child : source.getChildren()) {
+            if (child instanceof LiteralCommandNode) {
+                parentBuilder.then(this.copyLiteralNode((LiteralCommandNode<CommandSource>) child));
+                continue;
             }
-
-            final C sender = this.manager.senderMapper().map(invocation.source());
-            final Suggestions<C, ?> result = this.preferredSuggestions(sender, invocation.arguments());
-            return result.list().stream()
-                    .map(Suggestion::suggestion)
-                    .map(suggestion -> StringUtils.trimBeforeLastSpace(suggestion, result.commandInput()))
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-        }
-
-        private @NonNull Suggestions<C, ?> preferredSuggestions(
-                final @NonNull C sender,
-                final @NonNull String arguments
-        ) {
-            final Suggestions<C, ?> base = this.manager.suggestionFactory()
-                    .suggestImmediately(sender, this.suggestionInput(arguments));
-            if (arguments.trim().isEmpty() || arguments.endsWith(" ")) {
-                return base;
+            if (!addedArguments) {
+                parentBuilder.then(this.rawArgumentsNode(child));
+                addedArguments = true;
             }
+        }
+    }
 
+    private @NonNull LiteralArgumentBuilder<CommandSource> copyLiteralNode(final @NonNull LiteralCommandNode<CommandSource> source) {
+        final LiteralArgumentBuilder<CommandSource> builder = source.createBuilder();
+        if (source.getCommand() != null || source.getChildren().stream().anyMatch(child -> !(child instanceof LiteralCommandNode))) {
+            builder.executes(this.rawExecutor());
+        }
+        this.copyLiteralChildren(builder, source);
+        return builder;
+    }
+
+    private @NonNull RequiredArgumentBuilder<CommandSource, String> rawArgumentsNode(final @NonNull CommandNode<CommandSource> source) {
+        return BrigadierCommand.requiredArgumentBuilder(RAW_ARGUMENTS_NODE_NAME, StringArgumentType.greedyString())
+                .requires(source.getRequirement())
+                .suggests((context, builder) -> {
+                    final C sender = this.manager.senderMapper().map(context.getSource());
+                    for (final String suggestion : this.rawSuggestions(sender, context.getInput())) {
+                        builder.suggest(suggestion);
+                    }
+                    return builder.buildFuture();
+                })
+                .executes(this.rawExecutor());
+    }
+
+    private com.mojang.brigadier.@NonNull Command<CommandSource> rawExecutor() {
+        return context -> {
+            final C sender = this.manager.senderMapper().map(context.getSource());
+            this.manager.commandExecutor().executeCommand(sender, context.getInput());
+            return 1;
+        };
+    }
+
+    private @NonNull List<String> rawSuggestions(final @NonNull C sender, final @NonNull String input) {
+        final Suggestions<C, ?> base = this.manager.suggestionFactory().suggestImmediately(sender, input);
+        final Suggestions<C, ?> result;
+        if (input.trim().isEmpty() || input.endsWith(" ")) {
+            result = base;
+        } else {
             final Suggestions<C, ?> withTrailingSpace = this.manager.suggestionFactory()
-                    .suggestImmediately(sender, this.prefixInput(arguments + " "));
-            return withTrailingSpace.list().isEmpty() ? base : withTrailingSpace;
+                    .suggestImmediately(sender, input + " ");
+            result = withTrailingSpace.list().isEmpty() ? base : withTrailingSpace;
         }
-
-        private @NonNull String executionInput(final @NonNull String arguments) {
-            if (arguments.isEmpty()) {
-                return this.component.name();
-            }
-            if (this.blank(arguments)) {
-                return this.component.name();
-            }
-            return this.prefixInput(arguments);
-        }
-
-        private @NonNull String suggestionInput(final @NonNull String arguments) {
-            if (this.blank(arguments)) {
-                return this.component.name() + " ";
-            }
-            return this.prefixInput(arguments);
-        }
-
-        private @NonNull String prefixInput(final @NonNull String arguments) {
-            if (arguments.startsWith(" ")) {
-                return this.component.name() + arguments;
-            }
-            return this.component.name() + " " + arguments;
-        }
-
-        private boolean blank(final @NonNull String arguments) {
-            return arguments.trim().isEmpty();
-        }
+        return result.list().stream()
+                .map(Suggestion::suggestion)
+                .map(suggestion -> StringUtils.trimBeforeLastSpace(suggestion, result.commandInput()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
     }
 }

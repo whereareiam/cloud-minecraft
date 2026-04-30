@@ -24,24 +24,23 @@
 package org.incendo.cloud.velocity.type;
 
 import com.mojang.brigadier.tree.CommandNode;
+import com.mojang.brigadier.tree.LiteralCommandNode;
+import com.velocitypowered.api.command.BrigadierCommand;
 import com.velocitypowered.api.command.CommandMeta;
 import com.velocitypowered.api.command.CommandSource;
-import com.velocitypowered.api.command.RawCommand;
 import com.velocitypowered.api.event.EventManager;
 import com.velocitypowered.api.plugin.PluginContainer;
 import com.velocitypowered.api.proxy.ProxyServer;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 import org.incendo.cloud.SenderMapper;
 import org.incendo.cloud.execution.ExecutionCoordinator;
 import org.incendo.cloud.parser.standard.StringParser;
 import org.incendo.cloud.suggestion.SuggestionProvider;
 import org.incendo.cloud.velocity.VelocityCommandManager;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -52,7 +51,6 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -81,74 +79,18 @@ class VelocityRawRegistrationHandlerTest {
     }
 
     @Test
-    void rawSuggestionsIncludeLiteralsWhenArgumentsAreEmpty() {
-        // Arrange
+    @DisplayName("Raw mode registers a merged Brigadier command")
+    void rawModeRegistersMergedBrigadierCommand() {
         when(this.proxyServer.getCommandManager()).thenReturn(this.velocityCommandManager);
         when(this.proxyServer.getEventManager()).thenReturn(this.eventManager);
         lenient().when(this.pluginContainer.getExecutorService()).thenReturn(this.executorService);
-        when(this.velocityCommandManager.metaBuilder("test")).thenReturn(this.commandMetaBuilder);
+        when(this.velocityCommandManager.metaBuilder(any(BrigadierCommand.class))).thenReturn(this.commandMetaBuilder);
         when(this.commandMetaBuilder.aliases(any())).thenReturn(this.commandMetaBuilder);
-        final List<CommandNode<CommandSource>> hints = new ArrayList<>();
-        lenient().doAnswer(invocationOnMock -> {
-            hints.add(invocationOnMock.getArgument(0));
-            return this.commandMetaBuilder;
-        }).when(this.commandMetaBuilder).hint(any());
         when(this.commandMetaBuilder.build()).thenReturn(this.commandMeta);
-        when(this.commandMeta.getHints()).thenReturn(hints);
-        final ArgumentCaptor<CommandMeta> metaCaptor = ArgumentCaptor.forClass(CommandMeta.class);
+
         final ArgumentCaptor<com.velocitypowered.api.command.Command> commandCaptor =
                 ArgumentCaptor.forClass(com.velocitypowered.api.command.Command.class);
-        doNothing().when(this.velocityCommandManager).register(metaCaptor.capture(), commandCaptor.capture());
-
-        final VelocityCommandManager<CommandSource> manager = new VelocityCommandManager<>(
-                this.pluginContainer,
-                this.proxyServer,
-                ExecutionCoordinator.simpleCoordinator(),
-                SenderMapper.identity(),
-                VelocityCommandManager.RegistrationMode.RAW
-        );
-        manager.command(manager.commandBuilder("test").literal("status"));
-        manager.command(manager.commandBuilder("test").literal("enroll"));
-        manager.command(manager.commandBuilder("test").literal("confirm"));
-
-        final RawCommand rawCommand = (RawCommand) commandCaptor.getValue();
-        final RawCommand.Invocation invocation = mock(RawCommand.Invocation.class);
-        when(invocation.source()).thenReturn(this.commandSource);
-
-        when(invocation.arguments()).thenReturn("");
-        final List<String> emptySuggestions = rawCommand.suggest(invocation);
-
-        when(invocation.arguments()).thenReturn(" ");
-        final List<String> whitespaceSuggestions = rawCommand.suggest(invocation);
-
-        // Assert
-        assertThat(metaCaptor.getValue().getHints()).isNotEmpty();
-        assertThat(emptySuggestions).containsExactly("status", "enroll", "confirm");
-        assertThat(whitespaceSuggestions).containsExactly("status", "enroll", "confirm");
-    }
-
-    @Test
-    @DisplayName("Raw command metadata keeps subcommand hints even when the bare root is registered last")
-    void rawRegistrationAggregatesHintsAcrossSameRoot() {
-        when(this.proxyServer.getCommandManager()).thenReturn(this.velocityCommandManager);
-        when(this.proxyServer.getEventManager()).thenReturn(this.eventManager);
-        lenient().when(this.pluginContainer.getExecutorService()).thenReturn(this.executorService);
-        when(this.velocityCommandManager.metaBuilder("premium")).thenReturn(this.commandMetaBuilder);
-        when(this.commandMetaBuilder.aliases(any())).thenReturn(this.commandMetaBuilder);
-
-        final List<CommandNode<CommandSource>> hints = new ArrayList<>();
-        lenient().doAnswer(invocationOnMock -> {
-            hints.add(invocationOnMock.getArgument(0));
-            return this.commandMetaBuilder;
-        }).when(this.commandMetaBuilder).hint(any());
-        when(this.commandMetaBuilder.build()).thenReturn(this.commandMeta);
-        when(this.commandMeta.getHints()).thenReturn(hints);
-
-        final AtomicReference<CommandMeta> lastMeta = new AtomicReference<>();
-        lenient().doAnswer(invocationOnMock -> {
-            lastMeta.set(invocationOnMock.getArgument(0));
-            return null;
-        }).when(this.velocityCommandManager).register(any(CommandMeta.class), any(com.velocitypowered.api.command.Command.class));
+        doNothing().when(this.velocityCommandManager).register(any(CommandMeta.class), commandCaptor.capture());
 
         final VelocityCommandManager<CommandSource> manager = new VelocityCommandManager<>(
                 this.pluginContainer,
@@ -161,20 +103,57 @@ class VelocityRawRegistrationHandlerTest {
         manager.command(manager.commandBuilder("premium").literal("cancel"));
         manager.command(manager.commandBuilder("premium"));
 
-        assertThat(lastMeta.get()).isNotNull();
-        assertThat(lastMeta.get().getHints().stream().map(CommandNode::getName))
+        assertThat(commandCaptor.getValue()).isInstanceOf(BrigadierCommand.class);
+        final LiteralCommandNode<CommandSource> root = ((BrigadierCommand) commandCaptor.getValue()).getNode();
+        assertThat(root.getChildren().stream().map(CommandNode::getName))
                 .containsAtLeast("confirm", "cancel");
+        assertThat(root.getChild("confirm").getCommand()).isNotNull();
+        assertThat(root.getChild("cancel").getCommand()).isNotNull();
     }
 
     @Test
-    @DisplayName("Raw suggestions prefer next-argument completions when the current token is already complete")
-    void rawSuggestionsPreferTrailingArgumentSuggestions() {
+    @DisplayName("Raw mode keeps argument nodes for literal subcommands")
+    void rawModeKeepsArgumentNodes() {
         when(this.proxyServer.getCommandManager()).thenReturn(this.velocityCommandManager);
         when(this.proxyServer.getEventManager()).thenReturn(this.eventManager);
         lenient().when(this.pluginContainer.getExecutorService()).thenReturn(this.executorService);
-        when(this.velocityCommandManager.metaBuilder("identica")).thenReturn(this.commandMetaBuilder);
+        when(this.velocityCommandManager.metaBuilder(any(BrigadierCommand.class))).thenReturn(this.commandMetaBuilder);
         when(this.commandMetaBuilder.aliases(any())).thenReturn(this.commandMetaBuilder);
-        lenient().when(this.commandMetaBuilder.hint(any())).thenReturn(this.commandMetaBuilder);
+        when(this.commandMetaBuilder.build()).thenReturn(this.commandMeta);
+
+        final ArgumentCaptor<com.velocitypowered.api.command.Command> commandCaptor =
+                ArgumentCaptor.forClass(com.velocitypowered.api.command.Command.class);
+        doNothing().when(this.velocityCommandManager).register(any(CommandMeta.class), commandCaptor.capture());
+
+        final VelocityCommandManager<CommandSource> manager = new VelocityCommandManager<>(
+                this.pluginContainer,
+                this.proxyServer,
+                ExecutionCoordinator.simpleCoordinator(),
+                SenderMapper.identity(),
+                VelocityCommandManager.RegistrationMode.RAW
+        );
+        manager.command(manager.commandBuilder("identica").literal("admin"));
+        manager.command(manager.commandBuilder("identica")
+                .literal("enroll")
+                .required("eligibility", StringParser.stringParser(),
+                        SuggestionProvider.suggestingStrings("premium", "cracked")));
+        manager.command(manager.commandBuilder("identica"));
+
+        final LiteralCommandNode<CommandSource> root = ((BrigadierCommand) commandCaptor.getValue()).getNode();
+        final CommandNode<CommandSource> enroll = root.getChild("enroll");
+
+        assertThat(enroll).isNotNull();
+        assertThat(enroll.getChild("arguments")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Raw mode keeps literal branches and adds a single raw arguments branch")
+    void rawModeKeepsLiteralBranches() {
+        when(this.proxyServer.getCommandManager()).thenReturn(this.velocityCommandManager);
+        when(this.proxyServer.getEventManager()).thenReturn(this.eventManager);
+        lenient().when(this.pluginContainer.getExecutorService()).thenReturn(this.executorService);
+        when(this.velocityCommandManager.metaBuilder(any(BrigadierCommand.class))).thenReturn(this.commandMetaBuilder);
+        when(this.commandMetaBuilder.aliases(any())).thenReturn(this.commandMetaBuilder);
         when(this.commandMetaBuilder.build()).thenReturn(this.commandMeta);
 
         final ArgumentCaptor<com.velocitypowered.api.command.Command> commandCaptor =
@@ -189,19 +168,48 @@ class VelocityRawRegistrationHandlerTest {
                 VelocityCommandManager.RegistrationMode.RAW
         );
         manager.command(manager.commandBuilder("identica")
-                .literal("admin"));
+                .literal("admin")
+                .literal("clear")
+                .literal("confirm"));
         manager.command(manager.commandBuilder("identica")
-                .literal("enroll")
-                .required("eligibility", StringParser.stringParser(),
-                        SuggestionProvider.suggestingStrings("premium", "cracked")));
+                .literal("admin")
+                .literal("clear")
+                .required("target", StringParser.stringParser()));
 
-        final RawCommand rawCommand = (RawCommand) commandCaptor.getValue();
-        final RawCommand.Invocation invocation = mock(RawCommand.Invocation.class);
-        when(invocation.source()).thenReturn(this.commandSource);
-        when(invocation.arguments()).thenReturn("enroll");
+        final LiteralCommandNode<CommandSource> root = ((BrigadierCommand) commandCaptor.getValue()).getNode();
+        final CommandNode<CommandSource> clear = root.getChild("admin").getChild("clear");
 
-        final List<String> suggestions = rawCommand.suggest(invocation);
+        assertThat(clear.getChildren().stream().map(CommandNode::getName).collect(Collectors.toList()))
+                .containsAtLeast("confirm", "arguments");
+    }
 
-        assertThat(suggestions).containsExactly("premium", "cracked");
+    @Test
+    @DisplayName("Raw mode preserves permission predicates on literal branches")
+    void rawModePreservesPermissions() {
+        when(this.proxyServer.getCommandManager()).thenReturn(this.velocityCommandManager);
+        when(this.proxyServer.getEventManager()).thenReturn(this.eventManager);
+        lenient().when(this.pluginContainer.getExecutorService()).thenReturn(this.executorService);
+        when(this.velocityCommandManager.metaBuilder(any(BrigadierCommand.class))).thenReturn(this.commandMetaBuilder);
+        when(this.commandMetaBuilder.aliases(any())).thenReturn(this.commandMetaBuilder);
+        when(this.commandMetaBuilder.build()).thenReturn(this.commandMeta);
+        when(this.commandSource.hasPermission("identica.admin")).thenReturn(false);
+
+        final ArgumentCaptor<com.velocitypowered.api.command.Command> commandCaptor =
+                ArgumentCaptor.forClass(com.velocitypowered.api.command.Command.class);
+        doNothing().when(this.velocityCommandManager).register(any(CommandMeta.class), commandCaptor.capture());
+
+        final VelocityCommandManager<CommandSource> manager = new VelocityCommandManager<>(
+                this.pluginContainer,
+                this.proxyServer,
+                ExecutionCoordinator.simpleCoordinator(),
+                SenderMapper.identity(),
+                VelocityCommandManager.RegistrationMode.RAW
+        );
+        manager.command(manager.commandBuilder("identica")
+                .literal("cracked")
+                .permission("identica.admin"));
+
+        final LiteralCommandNode<CommandSource> root = ((BrigadierCommand) commandCaptor.getValue()).getNode();
+        assertThat(root.getChild("cracked").canUse(this.commandSource)).isFalse();
     }
 }
