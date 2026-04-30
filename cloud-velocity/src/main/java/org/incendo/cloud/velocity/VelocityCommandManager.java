@@ -76,7 +76,7 @@ public class VelocityCommandManager<C> extends CommandManager<C>
     private final ProxyServer proxyServer;
     private final SenderMapper<CommandSource, C> senderMapper;
     private final SuggestionFactory<C, ? extends TooltipSuggestion> suggestionFactory;
-    private final VelocityCommandRegistrationMode registrationMode;
+    private final RegistrationMode registrationMode;
 
     /**
      * Create a new command manager instance
@@ -87,7 +87,7 @@ public class VelocityCommandManager<C> extends CommandManager<C>
      * @param senderMapper                 Function that maps {@link CommandSource} to the command sender type
      */
     @Inject
-    @SuppressWarnings({"unchecked", "this-escape"})
+    @SuppressWarnings({"this-escape"})
     public VelocityCommandManager(
             final @NonNull PluginContainer plugin,
             final @NonNull ProxyServer proxyServer,
@@ -99,7 +99,7 @@ public class VelocityCommandManager<C> extends CommandManager<C>
                 proxyServer,
                 commandExecutionCoordinator,
                 senderMapper,
-                VelocityCommandRegistrationMode.BRIGADIER
+                RegistrationMode.BRIGADIER
         );
     }
 
@@ -112,13 +112,13 @@ public class VelocityCommandManager<C> extends CommandManager<C>
      * @param senderMapper                 Function that maps {@link CommandSource} to the command sender type
      * @param registrationMode             The Velocity command registration mode to use
      */
-    @SuppressWarnings({"unchecked", "this-escape"})
+    @SuppressWarnings({"this-escape"})
     public VelocityCommandManager(
             final @NonNull PluginContainer plugin,
             final @NonNull ProxyServer proxyServer,
             final @NonNull ExecutionCoordinator<C> commandExecutionCoordinator,
             final @NonNull SenderMapper<CommandSource, C> senderMapper,
-            final @NonNull VelocityCommandRegistrationMode registrationMode
+            final @NonNull RegistrationMode registrationMode
     ) {
         super(commandExecutionCoordinator, new VelocityPluginRegistrationHandler<>());
         this.proxyServer = proxyServer;
@@ -143,9 +143,7 @@ public class VelocityCommandManager<C> extends CommandManager<C>
                 .putCaption(VelocityCaptionKeys.ARGUMENT_PARSE_FAILURE_SERVER, ARGUMENT_PARSE_FAILURE_SERVER)
                 .build());
 
-        this.proxyServer.getEventManager().register(plugin, ServerPreConnectEvent.class, ev -> {
-            this.lockRegistration();
-        });
+        this.proxyServer.getEventManager().register(plugin, ServerPreConnectEvent.class, ev -> this.lockRegistration());
         this.parameterInjectorRegistry().registerInjector(
                 CommandSource.class,
                 (context, annotations) -> this.senderMapper.reverse(context.sender())
@@ -177,7 +175,7 @@ public class VelocityCommandManager<C> extends CommandManager<C>
      * {@inheritDoc}
      *
      * <p>{@link VelocityCommandManager}s always expose a Brigadier manager, even when commands are registered in
-     * {@link VelocityCommandRegistrationMode#RAW} mode.</p>
+     * {@link RegistrationMode#RAW raw mode}.</p>
      *
      * @return {@inheritDoc}
      * @since 1.2.0
@@ -197,7 +195,7 @@ public class VelocityCommandManager<C> extends CommandManager<C>
         return this.proxyServer;
     }
 
-    final @NonNull VelocityCommandRegistrationMode registrationMode() {
+    final @NonNull RegistrationMode registrationMode() {
         return this.registrationMode;
     }
 
@@ -215,5 +213,10 @@ public class VelocityCommandManager<C> extends CommandManager<C>
     @Override
     public final @NonNull SenderMapper<CommandSource, C> senderMapper() {
         return this.senderMapper;
+    }
+
+    public enum RegistrationMode {
+        BRIGADIER,
+        RAW
     }
 }
